@@ -12,6 +12,8 @@ os.environ["NUMBA_THREADING_LAYER"] = "omp"
 
 import rembg
 
+providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+
 
 class BLIP2():
     def __init__(self, device='cuda'):
@@ -34,7 +36,7 @@ class BLIP2():
 
 def process(image: Image, model: str = 'u2net', size: int = 512, border_ratio: float = 0.2,
             recenter: bool = True):
-    session = rembg.new_session(model_name=model)
+    session = rembg.new_session(model_name=model, providers=providers)
 
     image = np.array(image)
 
