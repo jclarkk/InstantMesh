@@ -17,5 +17,4 @@ imageio[ffmpeg]
 xatlas
 plyfile
 git+https://github.com/NVlabs/nvdiffrast/
-kiui==0.2.9
-pymeshlab==2023.12.post1
+pyacvd==0.2.11

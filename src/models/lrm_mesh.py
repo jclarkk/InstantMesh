@@ -17,6 +17,9 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
+import pyvista as pv
+import pyacvd
+from vtkmodules.vtkCommonDataModel import vtkCellArray
 from .encoder.dino_wrapper import DinoWrapper
 from .decoder.transformer import TriplaneTransformer
 from .renderer.synthesizer_mesh import TriplaneSynthesizer
@@ -362,10 +365,21 @@ class InstantMesh(nn.Module):
         vertices, faces = mesh_v[0], mesh_f[0]
 
         v_np, f_np = vertices.cpu().numpy(), faces.cpu().numpy()
-        v_np = self.laplacian_smooth(v_np, f_np)
 
-        v_np, f_np = clean_mesh(v_np, f_np)
-        v_np, f_np = decimate_mesh(v_np, f_np, target=2e4)
+        mesh = self.polydata_from_faces(v_np, f_np)
+
+        clus = pyacvd.Clustering(mesh)
+
+        n_clusters = 10000
+
+        clus.subdivide(3)
+
+        clus.cluster(nclus=n_clusters)
+
+        remeshed_mesh = clus.create_mesh()
+
+        v_np = remeshed_mesh.points
+        f_np = remeshed_mesh.faces.reshape(-1, 4)[:, 1:]
 
         vertices, faces = torch.from_numpy(v_np).to(device).float(), torch.from_numpy(f_np).to(device).float()
 
@@ -393,27 +407,14 @@ class InstantMesh(nn.Module):
         return vertices, faces, uvs, mesh_tex_idx, texture_map
 
     @staticmethod
-    def laplacian_smooth(vertices, triangles, num_iterations=4, lambda_factor=0.5):
-        for _ in range(num_iterations):
-            # Compute vertex neighbors
-            vertex_neighbors = {}
-            for tri in triangles:
-                for i in range(3):
-                    if tri[i] not in vertex_neighbors:
-                        vertex_neighbors[tri[i]] = []
-                    for j in range(3):
-                        if i != j:
-                            vertex_neighbors[tri[i]].append(tri[j])
+    def polydata_from_faces(points: np.ndarray, faces: np.ndarray) -> pv.PolyData:
+        if faces.ndim != 2:
+            raise ValueError("Expected a two dimensional face array.")
 
-            # Update vertex positions
-            new_vertices = vertices.copy()
-            for i in range(vertices.shape[0]):
-                if i in vertex_neighbors:
-                    neighbors = vertex_neighbors[i]
-                    neighbor_coords = vertices[neighbors]
-                    new_vertices[i] = (1 - lambda_factor) * vertices[i] + lambda_factor * np.mean(neighbor_coords,
-                                                                                                  axis=0)
+        pdata = pv.PolyData(points, faces)
 
-            vertices = new_vertices
-
-        return vertices
+        carr = vtkCellArray()
+        offset = np.arange(0, faces.size + 1, faces.shape[1], dtype=pv.ID_TYPE)
+        carr.SetData(pv.numpy_to_idarr(offset, deep=True), pv.numpy_to_idarr(faces, deep=True))
+        pdata.SetPolys(carr)
+        return pdata
