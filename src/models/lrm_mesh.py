@@ -15,8 +15,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import nvdiffrast.torch as dr
-from einops import rearrange, repeat
+from einops import rearrange
 
 from .encoder.dino_wrapper import DinoWrapper
 from .decoder.transformer import TriplaneTransformer
@@ -25,29 +24,31 @@ from .geometry.camera.perspective_camera import PerspectiveCamera
 from .geometry.render.neural_render import NeuralRender
 from .geometry.rep_3d.flexicubes_geometry import FlexiCubesGeometry
 from ..utils.mesh_util import xatlas_uvmap
+from kiui.mesh_utils import clean_mesh, decimate_mesh
 
 
 class InstantMesh(nn.Module):
     """
     Full model of the large reconstruction model.
     """
+
     def __init__(
-        self, 
-        encoder_freeze: bool = False, 
-        encoder_model_name: str = 'facebook/dino-vitb16', 
-        encoder_feat_dim: int = 768,
-        transformer_dim: int = 1024, 
-        transformer_layers: int = 16, 
-        transformer_heads: int = 16,
-        triplane_low_res: int = 32, 
-        triplane_high_res: int = 64, 
-        triplane_dim: int = 80,
-        rendering_samples_per_ray: int = 128,
-        grid_res: int = 128, 
-        grid_scale: float = 2.0,
+            self,
+            encoder_freeze: bool = False,
+            encoder_model_name: str = 'facebook/dino-vitb16',
+            encoder_feat_dim: int = 768,
+            transformer_dim: int = 1024,
+            transformer_layers: int = 16,
+            transformer_heads: int = 16,
+            triplane_low_res: int = 32,
+            triplane_high_res: int = 64,
+            triplane_dim: int = 80,
+            rendering_samples_per_ray: int = 128,
+            grid_res: int = 128,
+            grid_scale: float = 2.0,
     ):
         super().__init__()
-        
+
         # attributes
         self.grid_res = grid_res
         self.grid_scale = grid_scale
@@ -60,17 +61,17 @@ class InstantMesh(nn.Module):
         )
 
         self.transformer = TriplaneTransformer(
-            inner_dim=transformer_dim, 
-            num_layers=transformer_layers, 
+            inner_dim=transformer_dim,
+            num_layers=transformer_layers,
             num_heads=transformer_heads,
             image_feat_dim=encoder_feat_dim,
-            triplane_low_res=triplane_low_res, 
-            triplane_high_res=triplane_high_res, 
+            triplane_low_res=triplane_low_res,
+            triplane_high_res=triplane_high_res,
             triplane_dim=triplane_dim,
         )
-        
+
         self.synthesizer = TriplaneSynthesizer(
-            triplane_dim=triplane_dim, 
+            triplane_dim=triplane_dim,
             samples_per_ray=rendering_samples_per_ray,
         )
 
@@ -78,9 +79,9 @@ class InstantMesh(nn.Module):
         camera = PerspectiveCamera(fovy=fovy, device=device)
         renderer = NeuralRender(device, camera_model=camera)
         self.geometry = FlexiCubesGeometry(
-            grid_res=self.grid_res, 
-            scale=self.grid_scale, 
-            renderer=renderer, 
+            grid_res=self.grid_res,
+            scale=self.grid_scale,
+            renderer=renderer,
             render_type='neural_render',
             device=device,
         )
@@ -93,24 +94,24 @@ class InstantMesh(nn.Module):
         # encode images
         image_feats = self.encoder(images, cameras)
         image_feats = rearrange(image_feats, '(b v) l d -> b (v l) d', b=B)
-        
+
         # decode triplanes
         planes = self.transformer(image_feats)
 
         return planes
-    
+
     def get_sdf_deformation_prediction(self, planes):
         '''
         Predict SDF and deformation for tetrahedron vertices
         :param planes: triplane feature map for the geometry
         '''
         init_position = self.geometry.verts.unsqueeze(0).expand(planes.shape[0], -1, -1)
-        
+
         # Step 1: predict the SDF and deformation
         sdf, deformation, weight = torch.utils.checkpoint.checkpoint(
             self.synthesizer.get_geometry_prediction,
-            planes, 
-            init_position, 
+            planes,
+            init_position,
             self.geometry.indices,
             use_reentrant=False,
         )
@@ -155,7 +156,7 @@ class InstantMesh(nn.Module):
         sdf = torch.cat(final_sdf, dim=0)
         deformation = torch.cat(final_def, dim=0)
         return sdf, deformation, sdf_reg_loss, weight
-    
+
     def get_geometry_prediction(self, planes=None):
         '''
         Function to generate mesh with give triplanes
@@ -169,26 +170,27 @@ class InstantMesh(nn.Module):
         v_list = []
         f_list = []
         flexicubes_surface_reg_list = []
-        
+
         # Step 2: Using marching tet to obtain the mesh
         for i_batch in range(n_batch):
             verts, faces, flexicubes_surface_reg = self.geometry.get_mesh(
-                v_deformed[i_batch], 
+                v_deformed[i_batch],
                 sdf[i_batch].squeeze(dim=-1),
-                with_uv=False, 
-                indices=tets, 
+                with_uv=False,
+                indices=tets,
                 weight_n=weight[i_batch].squeeze(dim=-1),
                 is_training=self.training,
             )
             flexicubes_surface_reg_list.append(flexicubes_surface_reg)
             v_list.append(verts)
             f_list.append(faces)
-        
+
         flexicubes_surface_reg = torch.cat(flexicubes_surface_reg_list).mean()
         flexicubes_weight_reg = (weight ** 2).mean()
-        
-        return v_list, f_list, sdf, deformation, v_deformed, (sdf_reg_loss, flexicubes_surface_reg, flexicubes_weight_reg)
-    
+
+        return v_list, f_list, sdf, deformation, v_deformed, (
+        sdf_reg_loss, flexicubes_surface_reg, flexicubes_weight_reg)
+
     def get_texture_prediction(self, planes, tex_pos, hard_mask=None):
         '''
         Predict Texture given triplanes
@@ -220,7 +222,7 @@ class InstantMesh(nn.Module):
 
         tex_feat = torch.utils.checkpoint.checkpoint(
             self.synthesizer.get_texture_prediction,
-            planes, 
+            planes,
             tex_pos,
             use_reentrant=False,
         )
@@ -228,13 +230,14 @@ class InstantMesh(nn.Module):
         if hard_mask is not None:
             final_tex_feat = torch.zeros(
                 planes.shape[0], hard_mask.shape[1] * hard_mask.shape[2], tex_feat.shape[-1], device=tex_feat.device)
-            expanded_hard_mask = hard_mask.reshape(hard_mask.shape[0], -1, 1).expand(-1, -1, final_tex_feat.shape[-1]) > 0.5
+            expanded_hard_mask = hard_mask.reshape(hard_mask.shape[0], -1, 1).expand(-1, -1,
+                                                                                     final_tex_feat.shape[-1]) > 0.5
             for i in range(planes.shape[0]):
                 final_tex_feat[i][expanded_hard_mask[i]] = tex_feat[i][:n_point_list[i]].reshape(-1)
             tex_feat = final_tex_feat
 
         return tex_feat.reshape(planes.shape[0], hard_mask.shape[1], hard_mask.shape[2], tex_feat.shape[-1])
-    
+
     def render_mesh(self, mesh_v, mesh_f, cam_mv, render_size=256):
         '''
         Function to render a generated mesh with nvdiffrast
@@ -266,7 +269,7 @@ class InstantMesh(nn.Module):
         depth = torch.cat(return_value['depth'], dim=0)
         normal = torch.cat(return_value['normal'], dim=0)
         return mask, hard_mask, tex_pos, depth, normal
-    
+
     def forward_geometry(self, planes, render_cameras, render_size=256):
         '''
         Main function of our Generator. It first generate 3D mesh, then render it into 2D image
@@ -282,7 +285,8 @@ class InstantMesh(nn.Module):
         # Render the mesh into 2D image (get 3d position of each image plane)
         cam_mv = render_cameras
         run_n_view = cam_mv.shape[1]
-        antilias_mask, hard_mask, tex_pos, depth, normal = self.render_mesh(mesh_v, mesh_f, cam_mv, render_size=render_size)
+        antilias_mask, hard_mask, tex_pos, depth, normal = self.render_mesh(mesh_v, mesh_f, cam_mv,
+                                                                            render_size=render_size)
 
         tex_hard_mask = hard_mask
         tex_pos = [torch.cat([pos[i_view:i_view + 1] for i_view in range(run_n_view)], dim=2) for pos in tex_pos]
@@ -294,7 +298,7 @@ class InstantMesh(nn.Module):
 
         # Querying the texture field to predict the texture feature for each pixel on the image
         tex_feat = self.get_texture_prediction(planes, tex_pos, tex_hard_mask)
-        background_feature = torch.ones_like(tex_feat)      # white background
+        background_feature = torch.ones_like(tex_feat)  # white background
 
         # Merge them together
         img_feat = tex_feat * tex_hard_mask + background_feature * (1 - tex_hard_mask)
@@ -307,7 +311,7 @@ class InstantMesh(nn.Module):
 
         img = img_feat.clamp(0, 1).permute(0, 3, 1, 2).unflatten(0, (B, NV))
         antilias_mask = antilias_mask.permute(0, 3, 1, 2).unflatten(0, (B, NV))
-        depth = -depth.permute(0, 3, 1, 2).unflatten(0, (B, NV))        # transform negative depth to positive
+        depth = -depth.permute(0, 3, 1, 2).unflatten(0, (B, NV))  # transform negative depth to positive
         normal = normal.permute(0, 3, 1, 2).unflatten(0, (B, NV))
 
         out = {
@@ -338,11 +342,11 @@ class InstantMesh(nn.Module):
         }
 
     def extract_mesh(
-        self, 
-        planes: torch.Tensor, 
-        use_texture_map: bool = False,
-        texture_resolution: int = 1024,
-        **kwargs,
+            self,
+            planes: torch.Tensor,
+            use_texture_map: bool = False,
+            texture_resolution: int = 1024,
+            **kwargs,
     ):
         '''
         Extract a 3D mesh from FlexiCubes. Only support batch_size 1.
@@ -357,6 +361,14 @@ class InstantMesh(nn.Module):
         mesh_v, mesh_f, sdf, deformation, v_deformed, sdf_reg_loss = self.get_geometry_prediction(planes)
         vertices, faces = mesh_v[0], mesh_f[0]
 
+        v_np, f_np = vertices.cpu().numpy(), faces.cpu().numpy()
+        v_np = self.laplacian_smooth(v_np, f_np)
+
+        v_np, f_np = clean_mesh(v_np, f_np)
+        v_np, f_np = decimate_mesh(v_np, f_np, target=2e4)
+
+        vertices, faces = torch.from_numpy(v_np).to(device).float(), torch.from_numpy(f_np).to(device).float()
+
         if not use_texture_map:
             # query vertex colors
             vertices_tensor = vertices.unsqueeze(0)
@@ -367,9 +379,8 @@ class InstantMesh(nn.Module):
             return vertices.cpu().numpy(), faces.cpu().numpy(), vertices_colors
 
         # use x-atlas to get uv mapping for the mesh
-        ctx = dr.RasterizeCudaContext(device=device)
         uvs, mesh_tex_idx, gb_pos, tex_hard_mask = xatlas_uvmap(
-            self.geometry.renderer.ctx, vertices, faces, resolution=texture_resolution)
+            self.geometry.renderer.ctx, vertices.contiguous(), faces.contiguous(), resolution=texture_resolution)
         tex_hard_mask = tex_hard_mask.float()
 
         # query the texture field to get the RGB color for texture map
@@ -380,3 +391,29 @@ class InstantMesh(nn.Module):
         texture_map = img_feat.permute(0, 3, 1, 2).squeeze(0)
 
         return vertices, faces, uvs, mesh_tex_idx, texture_map
+
+    @staticmethod
+    def laplacian_smooth(vertices, triangles, num_iterations=4, lambda_factor=0.5):
+        for _ in range(num_iterations):
+            # Compute vertex neighbors
+            vertex_neighbors = {}
+            for tri in triangles:
+                for i in range(3):
+                    if tri[i] not in vertex_neighbors:
+                        vertex_neighbors[tri[i]] = []
+                    for j in range(3):
+                        if i != j:
+                            vertex_neighbors[tri[i]].append(tri[j])
+
+            # Update vertex positions
+            new_vertices = vertices.copy()
+            for i in range(vertices.shape[0]):
+                if i in vertex_neighbors:
+                    neighbors = vertex_neighbors[i]
+                    neighbor_coords = vertices[neighbors]
+                    new_vertices[i] = (1 - lambda_factor) * vertices[i] + lambda_factor * np.mean(neighbor_coords,
+                                                                                                  axis=0)
+
+            vertices = new_vertices
+
+        return vertices
