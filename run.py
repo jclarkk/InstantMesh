@@ -12,6 +12,7 @@ from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
+from src.utils import image_process
 from src.utils.train_util import instantiate_from_config
 from src.utils.camera_util import (
     FOV_to_intrinsics, 
@@ -156,8 +157,6 @@ print(f'Total number of input images: {len(input_files)}')
 # Stage 1: Multiview generation.
 ###############################################################################
 
-rembg_session = None if args.no_rembg else rembg.new_session()
-
 outputs = []
 for idx, image_file in enumerate(input_files):
     name = os.path.basename(image_file).split('.')[0]
@@ -166,8 +165,7 @@ for idx, image_file in enumerate(input_files):
     # remove background optionally
     input_image = Image.open(image_file)
     if not args.no_rembg:
-        input_image = remove_background(input_image, rembg_session)
-        input_image = resize_foreground(input_image, 0.85)
+        input_image = image_process.process(input_image)
     
     # sampling
     output_image = pipeline(
