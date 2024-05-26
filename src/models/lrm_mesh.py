@@ -27,7 +27,6 @@ from .geometry.camera.perspective_camera import PerspectiveCamera
 from .geometry.render.neural_render import NeuralRender
 from .geometry.rep_3d.flexicubes_geometry import FlexiCubesGeometry
 from ..utils.mesh_util import xatlas_uvmap
-from kiui.mesh_utils import clean_mesh, decimate_mesh
 
 
 class InstantMesh(nn.Module):
