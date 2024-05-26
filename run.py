@@ -5,6 +5,7 @@ import torch
 import rembg
 from PIL import Image
 from torchvision.transforms import v2
+from transformers import pipeline as hf_pipeline
 from pytorch_lightning import seed_everything
 from omegaconf import OmegaConf
 from einops import rearrange, repeat
@@ -12,7 +13,6 @@ from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
-from src.utils import image_process
 from src.utils.train_util import instantiate_from_config
 from src.utils.camera_util import (
     FOV_to_intrinsics, 
@@ -20,7 +20,7 @@ from src.utils.camera_util import (
     get_circular_camera_poses,
 )
 from src.utils.mesh_util import save_obj, save_obj_with_mtl
-from src.utils.infer_util import remove_background, resize_foreground, save_video
+from src.utils.infer_util import save_video
 
 
 def get_render_cameras(batch_size=1, M=120, radius=4.0, elevation=20.0, is_flexicubes=False):
@@ -163,9 +163,11 @@ for idx, image_file in enumerate(input_files):
     print(f'[{idx+1}/{len(input_files)}] Imagining {name} ...')
 
     # remove background optionally
-    input_image = Image.open(image_file)
     if not args.no_rembg:
-        input_image = image_process.process(input_image)
+        pipe = hf_pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
+        input_image = pipe(image_file)
+    else:
+        input_image = Image.open(image_file)
     
     # sampling
     output_image = pipeline(
