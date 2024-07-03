@@ -72,13 +72,14 @@ parser.add_argument('config', type=str, help='Path to config file.')
 parser.add_argument('input_path', type=str, help='Path to input image or directory.')
 parser.add_argument('--output_path', type=str, default='outputs/', help='Output directory.')
 parser.add_argument('--diffusion_steps', type=int, default=75, help='Denoising Sampling steps.')
-parser.add_argument('--seed', type=int, default=1666666666, help='Random seed for sampling.')
+parser.add_argument('--seed', type=int, default=555, help='Random seed for sampling.')
 parser.add_argument('--scale', type=float, default=0.8, help='Scale of generated object.')
 parser.add_argument('--distance', type=float, default=4.5, help='Render distance.')
 parser.add_argument('--view', type=int, default=6, choices=[4, 6], help='Number of input views.')
 parser.add_argument('--no_rembg', action='store_true', help='Do not remove input background.')
 parser.add_argument('--export_texmap', action='store_true', help='Export a mesh with texture map.')
 parser.add_argument('--save_video', action='store_true', help='Save a circular-view video.')
+parser.add_argument('--im', action='store_true', help='Remesh with InstantMeshes.')
 args = parser.parse_args()
 seed_everything(args.seed)
 
@@ -216,6 +217,7 @@ for idx, sample in enumerate(outputs):
         mesh_out = model.extract_mesh(
             planes,
             use_texture_map=args.export_texmap,
+            use_instant_meshes=args.im,
             **infer_config,
         )
         if args.export_texmap:

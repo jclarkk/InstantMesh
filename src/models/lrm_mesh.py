@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 
 import numpy as np
 import torch
@@ -19,6 +20,7 @@ from einops import rearrange
 
 import pyvista as pv
 import pyacvd
+import trimesh
 from vtkmodules.vtkCommonDataModel import vtkCellArray
 from .encoder.dino_wrapper import DinoWrapper
 from .decoder.transformer import TriplaneTransformer
@@ -46,7 +48,7 @@ class InstantMesh(nn.Module):
             triplane_high_res: int = 64,
             triplane_dim: int = 80,
             rendering_samples_per_ray: int = 128,
-            grid_res: int = 128,
+            grid_res: int = 64,
             grid_scale: float = 2.0,
     ):
         super().__init__()
@@ -348,6 +350,7 @@ class InstantMesh(nn.Module):
             planes: torch.Tensor,
             use_texture_map: bool = False,
             texture_resolution: int = 1024,
+            use_instant_meshes: bool = False,
             **kwargs,
     ):
         '''
@@ -365,22 +368,46 @@ class InstantMesh(nn.Module):
 
         v_np, f_np = vertices.cpu().numpy(), faces.cpu().numpy()
 
-        mesh = self.polydata_from_faces(v_np, f_np)
+        if use_instant_meshes:
+            # re-mesh the mesh using Instant Meshes
+            im_input_mesh = os.path.join(os.getcwd(), 'input_mesh.obj')
+            im_output_mesh = os.path.join(os.getcwd(), 'output_mesh.obj')
 
-        clus = pyacvd.Clustering(mesh)
+            # Write mesh using trimesh
+            mesh = trimesh.Trimesh(vertices=v_np, faces=f_np)
+            mesh.export(im_input_mesh)
 
-        n_clusters = 10000
+            # Execute Instant Meshes via bash
+            command = f"InstantMeshes {im_input_mesh} -f 5000 -o {im_output_mesh}"
+            os.system(command)
 
-        clus.subdivide(3)
+            # Load the re-meshed mesh using trimesh
+            mesh = trimesh.load_mesh(im_output_mesh)
 
-        clus.cluster(nclus=n_clusters)
+            # Delete temp files
+            os.unlink(im_input_mesh)
+            os.unlink(im_output_mesh)
 
-        remeshed_mesh = clus.create_mesh()
+            # Convert mesh into vertices and faces tensors
+            v_np, f_np = mesh.vertices, mesh.faces
+            vertices, faces = torch.from_numpy(v_np).to(device).float(), torch.from_numpy(f_np).to(device).float()
+        else:
+            mesh = self.polydata_from_faces(v_np, f_np)
 
-        v_np = remeshed_mesh.points
-        f_np = remeshed_mesh.faces.reshape(-1, 4)[:, 1:]
+            clus = pyacvd.Clustering(mesh)
 
-        vertices, faces = torch.from_numpy(v_np).to(device).float(), torch.from_numpy(f_np).to(device).float()
+            n_clusters = 10000
+
+            clus.subdivide(3)
+
+            clus.cluster(nclus=n_clusters)
+
+            remeshed_mesh = clus.create_mesh()
+
+            v_np = remeshed_mesh.points
+            f_np = remeshed_mesh.faces.reshape(-1, 4)[:, 1:]
+
+            vertices, faces = torch.from_numpy(v_np).to(device).float(), torch.from_numpy(f_np).to(device).float()
 
         if not use_texture_map:
             # query vertex colors
