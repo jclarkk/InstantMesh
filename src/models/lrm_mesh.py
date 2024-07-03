@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 
+import pymeshfix
 import pyvista as pv
 import pyacvd
 import trimesh
@@ -367,6 +368,8 @@ class InstantMesh(nn.Module):
         vertices, faces = mesh_v[0], mesh_f[0]
 
         v_np, f_np = vertices.cpu().numpy(), faces.cpu().numpy()
+
+        v_np, f_np = pymeshfix.clean_from_arrays(v_np, f_np)
 
         if use_instant_meshes:
             # re-mesh the mesh using Instant Meshes

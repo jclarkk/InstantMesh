@@ -18,3 +18,4 @@ xatlas
 plyfile
 git+https://github.com/NVlabs/nvdiffrast/
 pyacvd==0.2.11
+pymeshfix==0.17.0
