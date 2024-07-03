@@ -378,7 +378,7 @@ class InstantMesh(nn.Module):
             mesh.export(im_input_mesh)
 
             # Execute Instant Meshes via bash
-            command = f"/usr/local/bin/InstantMeshes {im_input_mesh} -f 5000 -o {im_output_mesh}"
+            command = f"InstantMeshes {im_input_mesh} -f 5000 -o {im_output_mesh}"
             os.system(command)
 
             # Load the re-meshed mesh using trimesh
